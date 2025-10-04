@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       video_urls:
-        description: 'YouTube URLs (comma-separated)'
+        description: 'https://youtu.be/KW4TD4BL-Iw?si=cvzUUY2XUh6YIkaw'
         required: true
         type: string
       quality:
