@@ -1,75 +1,141 @@
-# .github/workflows/youtube-downloader.yml
-name: YouTube Downloader CI
+# .github/workflows/advanced-downloader.yml
+name: Advanced YouTube Downloader
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
     inputs:
-      video_url:
-        description: 'YouTube Video URL'
+      video_urls:
+        description: 'YouTube URLs (comma-separated)'
         required: true
         type: string
-      output_format:
+      quality:
+        description: 'Video quality'
+        default: 'best'
+        type: choice
+        options:
+        - best
+        - 1080p
+        - 720p
+        - 480p
+        - worst
+      format:
         description: 'Output format'
-        required: false
         default: 'mp4'
         type: choice
         options:
         - mp4
-        - mp3
         - webm
-
-env:
-  PYTHON_VERSION: '3.10'
-  OUTPUT_DIR: 'downloads'
+        - mp3
+        - m4a
 
 jobs:
-  test-downloader:
-    runs-on: ubuntu-latest
-    
+  download-matrix:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.9', '3.10', '3.11']
+      fail-fast: false
+
     steps:
-    - name: Checkout code
+    - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Set up Python
+    - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
-        python-version: ${{ env.PYTHON_VERSION }}
+        python-version: ${{ matrix.python-version }}
 
     - name: Install system dependencies
+      if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
         sudo apt-get install -y ffmpeg
 
-    - name: Install Python dependencies
+    - name: Install Windows dependencies
+      if: matrix.os == 'windows-latest'
+      run: |
+        choco install ffmpeg -y
+
+    - name: Install macOS dependencies
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install ffmpeg
+
+    - name: Install Python packages
       run: |
         python -m pip install --upgrade pip
         pip install yt-dlp
-        pip install -r requirements.txt
+        pip install requests
+        pip install python-dotenv
 
-    - name: Run basic tests
+    - name: Create download script
       run: |
-        python -c "import yt_dlp; print('yt-dlp version:', yt_dlp.version.__version__)"
-        python -c "import sys; print('Python version:', sys.version)"
+        cat > download_videos.py << 'EOF'
+        #!/usr/bin/env python3
+        import yt_dlp
+        import os
+        import sys
+        import argparse
+        
+        def download_videos(urls, quality, format, output_dir="downloads"):
+            os.makedirs(output_dir, exist_ok=True)
+            
+            ydl_opts = {
+                'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
+                'format': f'{quality}[ext={format}]' if quality != 'best' else 'best',
+            }
+            
+            if format == 'mp3':
+                ydl_opts.update({
+                    'format': 'bestaudio/best',
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '192',
+                    }],
+                })
+            
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download(urls)
+                print(f"✅ Successfully downloaded {len(urls)} videos")
+            except Exception as e:
+                print(f"❌ Error downloading: {e}")
+                sys.exit(1)
+        
+        if __name__ == "__main__":
+            parser = argparse.ArgumentParser()
+            parser.add_argument('--urls', required=True, help='Comma-separated YouTube URLs')
+            parser.add_argument('--quality', default='best', help='Video quality')
+            parser.add_argument('--format', default='mp4', help='Output format')
+            parser.add_argument('--output', default='downloads', help='Output directory')
+            
+            args = parser.parse_args()
+            urls = [url.strip() for url in args.urls.split(',')]
+            
+            download_videos(urls, args.quality, args.format, args.output)
+        EOF
 
-    - name: Test download functionality
+    - name: Run downloader
       if: github.event_name == 'workflow_dispatch'
       run: |
-        mkdir -p ${{ env.OUTPUT_DIR }}
-        python scripts/downloader.py \
-          --url "${{ github.event.inputs.video_url }}" \
-          --format "${{ github.event.inputs.output_format }}" \
-          --output "${{ env.OUTPUT_DIR }}"
-      env:
-        VIDEO_URL: ${{ github.event.inputs.video_url }}
+        python download_videos.py \
+          --urls "${{ github.event.inputs.video_urls }}" \
+          --quality "${{ github.event.inputs.quality }}" \
+          --format "${{ github.event.inputs.format }}" \
+          --output "downloads_${{ matrix.os }}_${{ matrix.python-version }}"
 
-    - name: Upload downloaded files
+    - name: List downloaded files
+      if: github.event_name == 'workflow_dispatch' && success()
+      run: |
+        echo "📁 Downloaded files:"
+        find . -name "downloads_*" -type f | head -10
+
+    - name: Upload artifacts
       if: github.event_name == 'workflow_dispatch' && success()
       uses: actions/upload-artifact@v4
       with:
-        name: downloaded-videos
-        path: ${{ env.OUTPUT_DIR }}/
+        name: videos-${{ matrix.os }}-py${{ matrix.python-version }}
+        path: downloads_${{ matrix.os }}_${{ matrix.python-version }}/
         retention-days: 1
