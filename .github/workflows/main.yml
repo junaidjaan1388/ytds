@@ -1,141 +1,39 @@
-# .github/workflows/advanced-downloader.yml
-name: Advanced YouTube Downloader
+name: Multi-Profile TikTok Downloader
 
 on:
   workflow_dispatch:
-    inputs:
-      video_urls:
-        description: 'https://youtu.be/KW4TD4BL-Iw?si=cvzUUY2XUh6YIkaw'
-        required: true
-        type: string
-      quality:
-        description: 'Video quality'
-        default: 'best'
-        type: choice
-        options:
-        - best
-        - 1080p
-        - 720p
-        - 480p
-        - worst
-      format:
-        description: 'Output format'
-        default: 'mp4'
-        type: choice
-        options:
-        - mp4
-        - webm
-        - mp3
-        - m4a
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 6 AM
+
+env:
+  PROFILES: |
+    sufi_vibes780
+    another_profile
+    third_profile
 
 jobs:
-  download-matrix:
-    runs-on: ${{ matrix.os }}
+  download-all:
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.9', '3.10', '3.11']
-      fail-fast: false
-
+        profile: ['sufi_vibes780']  # Add more profiles here
+    
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Install system dependencies
-      if: matrix.os == 'ubuntu-latest'
+    - uses: actions/checkout@v4
+    
+    - name: Download for profile ${{ matrix.profile }}
       run: |
-        sudo apt-get update
-        sudo apt-get install -y ffmpeg
-
-    - name: Install Windows dependencies
-      if: matrix.os == 'windows-latest'
-      run: |
-        choco install ffmpeg -y
-
-    - name: Install macOS dependencies
-      if: matrix.os == 'macos-latest'
-      run: |
-        brew install ffmpeg
-
-    - name: Install Python packages
-      run: |
-        python -m pip install --upgrade pip
-        pip install yt-dlp
-        pip install requests
-        pip install python-dotenv
-
-    - name: Create download script
-      run: |
-        cat > download_videos.py << 'EOF'
-        #!/usr/bin/env python3
-        import yt_dlp
-        import os
-        import sys
-        import argparse
-        
-        def download_videos(urls, quality, format, output_dir="downloads"):
-            os.makedirs(output_dir, exist_ok=True)
-            
-            ydl_opts = {
-                'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
-                'format': f'{quality}[ext={format}]' if quality != 'best' else 'best',
-            }
-            
-            if format == 'mp3':
-                ydl_opts.update({
-                    'format': 'bestaudio/best',
-                    'postprocessors': [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': '192',
-                    }],
-                })
-            
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download(urls)
-                print(f"✅ Successfully downloaded {len(urls)} videos")
-            except Exception as e:
-                print(f"❌ Error downloading: {e}")
-                sys.exit(1)
-        
-        if __name__ == "__main__":
-            parser = argparse.ArgumentParser()
-            parser.add_argument('--urls', required=True, help='Comma-separated YouTube URLs')
-            parser.add_argument('--quality', default='best', help='Video quality')
-            parser.add_argument('--format', default='mp4', help='Output format')
-            parser.add_argument('--output', default='downloads', help='Output directory')
-            
-            args = parser.parse_args()
-            urls = [url.strip() for url in args.urls.split(',')]
-            
-            download_videos(urls, args.quality, args.format, args.output)
-        EOF
-
-    - name: Run downloader
-      if: github.event_name == 'workflow_dispatch'
-      run: |
-        python download_videos.py \
-          --urls "${{ github.event.inputs.video_urls }}" \
-          --quality "${{ github.event.inputs.quality }}" \
-          --format "${{ github.event.inputs.format }}" \
-          --output "downloads_${{ matrix.os }}_${{ matrix.python-version }}"
-
-    - name: List downloaded files
-      if: github.event_name == 'workflow_dispatch' && success()
-      run: |
-        echo "📁 Downloaded files:"
-        find . -name "downloads_*" -type f | head -10
-
-    - name: Upload artifacts
-      if: github.event_name == 'workflow_dispatch' && success()
+        pip3 install yt-dlp
+        mkdir -p ${{ matrix.profile }}
+        yt-dlp \
+          --ignore-errors \
+          --no-warnings \
+          -f "best[ext=mp4]" \
+          -o "${{ matrix.profile }}/%(title).100s.%(ext)s" \
+          "https://www.tiktok.com/@${{ matrix.profile }}"
+      
+    - name: Upload profile videos
       uses: actions/upload-artifact@v4
       with:
-        name: videos-${{ matrix.os }}-py${{ matrix.python-version }}
-        path: downloads_${{ matrix.os }}_${{ matrix.python-version }}/
-        retention-days: 1
+        name: ${{ matrix.profile }}-videos
+        path: ${{ matrix.profile }}/
