@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader - Deno</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎬 YouTube Downloader</h1>
+            <p>Download YouTube videos and audio with Deno</p>
+        </header>
+
+        <main>
+            <div class="input-section">
+                <input type="text" id="videoUrl" placeholder="Paste YouTube URL here..." />
+                <button id="fetchBtn">Get Video Info</button>
+            </div>
+
+            <div id="loading" class="loading hidden">
+                <div class="spinner"></div>
+                <p>Fetching video information...</p>
+            </div>
+
+            <div id="error" class="error hidden"></div>
+
+            <div id="videoInfo" class="video-info hidden">
+                <div class="video-header">
+                    <img id="thumbnail" src="" alt="Thumbnail">
+                    <div class="video-details">
+                        <h3 id="videoTitle"></h3>
+                        <p id="videoAuthor"></p>
+                        <p id="videoDuration"></p>
+                        <p id="videoViews"></p>
+                    </div>
+                </div>
+
+                <div class="download-options">
+                    <h4>Video Formats</h4>
+                    <div id="videoFormats" class="formats-grid"></div>
+
+                    <h4>Audio Formats</h4>
+                    <div id="audioFormats" class="formats-grid"></div>
+                </div>
+            </div>
+
+            <div id="downloadInfo" class="download-info hidden">
+                <h4>Download Ready</h4>
+                <p id="downloadMessage"></p>
+                <a id="downloadLink" class="download-btn" download>Download Now</a>
+            </div>
+        </main>
+
+        <footer>
+            <p>Powered by Deno + ytdl-core</p>
+        </footer>
+    </div>
+
+    <script>
+        class YouTubeDownloader {
+            constructor() {
+                this.videoUrl = document.getElementById('videoUrl');
+                this.fetchBtn = document.getElementById('fetchBtn');
+                this.loading = document.getElementById('loading');
+                this.error = document.getElementById('error');
+                this.videoInfo = document.getElementById('videoInfo');
+                this.downloadInfo = document.getElementById('downloadInfo');
+                
+                this.init();
+            }
+
+            init() {
+                this.fetchBtn.addEventListener('click', () => this.fetchVideoInfo());
+                this.videoUrl.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') this.fetchVideoInfo();
+                });
+            }
+
+            async fetchVideoInfo() {
+                const url = this.videoUrl.value.trim();
+                if (!url) {
+                    this.showError('Please enter a YouTube URL');
+                    return;
+                }
+
+                const videoId = this.extractVideoId(url);
+                if (!videoId) {
+                    this.showError('Invalid YouTube URL');
+                    return;
+                }
+
+                this.showLoading(true);
+                this.hideError();
+                this.hideVideoInfo();
+
+                try {
+                    // Fetch video information
+                    const response = await fetch(`/vid?id=${videoId}`);
+                    const data = await response.json();
+
+                    if (data.error) {
+                        throw new Error(data.message || 'Failed to fetch video info');
+                    }
+
+                    this.displayVideoInfo(data);
+                    this.fetchAudioFormats(videoId);
+
+                } catch (error) {
+                    this.showError(error.message);
+                } finally {
+                    this.showLoading(false);
+                }
+            }
+
+            async fetchAudioFormats(videoId) {
+                try {
+                    const response = await fetch(`/audio?id=${videoId}`);
+                    const data = await response.json();
+
+                    if (!data.error) {
+                        this.displayAudioFormats(data.audio);
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch audio formats:', error);
+                }
+            }
+
+            extractVideoId(url) {
+                const patterns = [
+                    /(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&]+)/,
+                    /youtube\.com\/embed\/([^?]+)/,
+                    /youtube\.com\/v\/([^?]+)/
+                ];
+
+                for (const pattern of patterns) {
+                    const match = url.match(pattern);
+                    if (match && match[1]) {
+                        return match[1];
+                    }
+                }
+                return null;
+            }
+
+            displayVideoInfo(data) {
+                const video = data.video;
+                
+                // Update video details
+                document.getElementById('videoTitle').textContent = video.title;
+                document.getElementById('videoAuthor').textContent = `By: ${video.author}`;
+                document.getElementById('videoDuration').textContent = `Duration: ${this.formatDuration(video.lengthSeconds)}`;
+                document.getElementById('videoViews').textContent = `Views: ${parseInt(video.viewCount).toLocaleString()}`;
+                
+                // Set thumbnail
+                const thumbnail = document.getElementById('thumbnail');
+                thumbnail.src = video.thumbnail.thumbnails.pop().url;
+                thumbnail.alt = video.title;
+
+                // Display video formats
+                this.displayVideoFormats(data.formats, video.title);
+
+                this.showVideoInfo();
+            }
+
+            displayVideoFormats(formats, title) {
+                const container = document.getElementById('videoFormats');
+                container.innerHTML = '';
+
+                // Filter and sort video formats
+                const videoFormats = formats
+                    .filter(format => format.hasVideo && format.qualityLabel)
+                    .sort((a, b) => {
+                        const qualityA = parseInt(a.qualityLabel) || 0;
+                        const qualityB = parseInt(b.qualityLabel) || 0;
+                        return qualityB - qualityA;
+                    });
+
+                if (videoFormats.length === 0) {
+                    container.innerHTML = '<p>No video formats available</p>';
+                    return;
+                }
+
+                videoFormats.forEach(format => {
+                    const formatCard = this.createFormatCard(format, title, 'video');
+                    container.appendChild(formatCard);
+                });
+            }
+
+            displayAudioFormats(audioFormats) {
+                const container = document.getElementById('audioFormats');
+                container.innerHTML = '';
+
+                if (!audioFormats || audioFormats.length === 0) {
+                    container.innerHTML = '<p>No audio formats available</p>';
+                    return;
+                }
+
+                audioFormats.forEach(format => {
+                    const formatCard = this.createFormatCard(format, '', 'audio');
+                    container.appendChild(formatCard);
+                });
+            }
+
+            createFormatCard(format, title, type) {
+                const card = document.createElement('div');
+                card.className = 'format-card';
+                
+                const quality = type === 'video' ? 
+                    format.qualityLabel : 
+                    `${format.audioBitrate}kbps`;
+                
+                const codec = format.mimeType?.split(';')[0] || 'Unknown';
+                const container = format.mimeType?.includes('mp4') ? 'MP4' : 'WebM';
+
+                card.innerHTML = `
+                    <div class="format-quality">${quality}</div>
+                    <div class="format-details">
+                        <span>${container}</span>
+                        <span>${codec.split('/')[1]}</span>
+                    </div>
+                    <button class="download-format-btn" data-itag="${format.itag}" data-type="${type}">
+                        Download
+                    </button>
+                `;
+
+                const downloadBtn = card.querySelector('.download-format-btn');
+                downloadBtn.addEventListener('click', () => {
+                    this.prepareDownload(format.itag, type, title);
+                });
+
+                return card;
+            }
+
+            async prepareDownload(itag, type, title) {
+                const videoId = this.extractVideoId(this.videoUrl.value);
+                if (!videoId) return;
+
+                this.showLoading(true);
+
+                try {
+                    const response = await fetch(`/download?id=${videoId}&itag=${itag}&type=${type}`);
+                    const data = await response.json();
+
+                    if (data.error) {
+                        throw new Error(data.message);
+                    }
+
+                    this.showDownloadInfo(data);
+
+                } catch (error) {
+                    this.showError(error.message);
+                } finally {
+                    this.showLoading(false);
+                }
+            }
+
+            showDownloadInfo(data) {
+                const downloadLink = document.getElementById('downloadLink');
+                const downloadMessage = document.getElementById('downloadMessage');
+                
+                downloadLink.href = data.url;
+                downloadLink.download = data.filename;
+                downloadMessage.textContent = `Ready to download: ${data.title} (${data.quality})`;
+                
+                this.downloadInfo.classList.remove('hidden');
+                
+                // Auto-scroll to download section
+                this.downloadInfo.scrollIntoView({ behavior: 'smooth' });
+            }
+
+            formatDuration(seconds) {
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                const secs = seconds % 60;
+                
+                if (hours > 0) {
+                    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                } else {
+                    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+                }
+            }
+
+            showLoading(show) {
+                this.loading.classList.toggle('hidden', !show);
+            }
+
+            showError(message) {
+                this.error.textContent = message;
+                this.error.classList.remove('hidden');
+            }
+
+            hideError() {
+                this.error.classList.add('hidden');
+            }
+
+            showVideoInfo() {
+                this.videoInfo.classList.remove('hidden');
+            }
+
+            hideVideoInfo() {
+                this.videoInfo.classList.add('hidden');
+            }
+        }
+
+        // Initialize the downloader when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new YouTubeDownloader();
+        });
+    </script>
+</body>
+</html>
