@@ -1,0 +1,4 @@
+# requirements.txt
+yt-dlp
+fastapi
+uvicorn
